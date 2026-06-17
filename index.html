@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工地项目造价分析系统 - 蓝白毛玻璃版</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 SheetJS -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        /* 针对不支持 backdrop-blur 的旧浏览器的兼容性回退 */
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.4);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+        }
+        /* 隐藏滚动条 */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<!-- 使用 #85BDCF 调和的蓝白优雅渐变底色 -->
+<body class="bg-gradient-to-br from-[#f2f7f9] via-[#dae7eb] to-[#85BDCF] min-h-screen text-slate-800 font-sans antialiased pb-12">
+<div class="max-w-7xl mx-auto px-4 py-6">
+    
+    <!-- 顶部精简控制条 -->
+    <header class="flex flex-col md:flex-row md:items-center md:justify-between pb-4 mb-6 border-b border-white/30">
+        <div>
+            <h1 class="text-xl font-bold text-[#3d6f7f] tracking-wide">
+                HG八代形象新装店铺造价分析系统
+            </h1>
+            <p class="text-xs text-slate-600 mt-1">
+                本地离线解析 · 实时单位造价
+            </p>
+        </div>
+        
+        <!-- 控制区：极简导入、自动同步与手动刷新 -->
+        <div class="mt-4 md:mt-0 flex flex-wrap items-center gap-2 text-xs">
+            
+            <!-- 手动刷新按钮 -->
+            <button id="btnManualRefresh" onclick="manualRefresh()" class="flex items-center space-x-1 bg-white/70 hover:bg-white/90 border border-white/80 text-[#3d6f7f] px-3 py-1.5 rounded-lg shadow-sm transition cursor-pointer">
+                <svg class="w-3.5 h-3.5 text-[#528d9f]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.248 8H18.5M4 4h4.5"></path>
+                </svg>
+                <span class="font-medium">手动刷新数据</span>
+            </button>
+
+            <!-- 自动同步按钮 (基于 File System API) -->
+            <button id="btnAutoSync" onclick="selectFileForSync()" class="hidden flex items-center space-x-1.5 bg-white/50 border border-white/75 text-[#3d6f7f] px-3 py-1.5 rounded-lg hover:bg-white/85 transition cursor-pointer">
+                <span class="relative flex h-2 w-2">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#85BDCF] opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-2 w-2 bg-[#85BDCF]"></span>
+                </span>
+                <span class="font-medium">开启自动刷新 (1小时)</span>
+            </button>
+            
+            <!-- 传统手动导入按钮 -->
+            <div class="relative bg-[#85BDCF]/20 border border-white/80 rounded-lg py-1.5 px-3 hover:bg-[#85BDCF]/30 transition cursor-pointer overflow-hidden flex items-center space-x-1 text-[#3d6f7f]">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                </svg>
+                <span class="font-medium">导入 Excel</span>
+                <input type="file" id="fileInput" accept=".xlsx, .xls" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+            </div>
+            
+            <!-- 状态指示器 -->
+            <div id="syncStatus" class="text-slate-600 bg-white/40 border border-white/40 px-3 py-1.5 rounded-lg">
+                等待导入数据...
+            </div>
+        </div>
+    </header>
+
+    <!-- 未加载时的毛玻璃等待界面 -->
+    <div id="noDataTips" class="flex flex-col items-center justify-center py-24 glass-panel rounded-2xl shadow-lg">
+        <div class="relative flex items-center justify-center mb-4">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[#85BDCF]"></div>
+            <div class="absolute text-[#528d9f] text-xs font-mono">HG</div>
+        </div>
+        <p class="text-slate-700 text-sm font-medium">请在右上角导入工程装修汇总表</p>
+        <p id="browserSupportTips" class="text-slate-500 text-xs mt-2"></p>
+    </div>
+
+    <!-- 数据看板 (默认隐藏) -->
+    <div id="dashboard" class="hidden space-y-6">
+        
+        <!-- 核心数据汇总指标卡片 (毛玻璃微型化设计) -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="glass-panel p-4 rounded-2xl flex items-center justify-between shadow-md">
+                <div>
+                    <p class="text-xs text-slate-500 font-medium">统计店铺数</p>
+                    <p id="statTotalStores" class="text-xl font-bold text-[#3d6f7f] mt-1">0 个</p>
+                </div>
+                <div class="bg-[#85BDCF]/20 p-2 rounded-xl text-[#3d6f7f]">🏢</div>
+            </div>
+            <div class="glass-panel p-4 rounded-2xl flex items-center justify-between shadow-md">
+                <div>
+                    <p class="text-xs text-slate-500 font-medium">总预算造价</p>
+                    <p id="statTotalCost" class="text-xl font-bold text-[#3d6f7f] mt-1">¥ 0.00</p>
+                </div>
+                <div class="bg-[#85BDCF]/20 p-2 rounded-xl text-[#3d6f7f]">💰</div>
+            </div>
+            <div class="glass-panel p-4 rounded-2xl flex items-center justify-between shadow-md">
+                <div>
+                    <p class="text-xs text-slate-500 font-medium">统计项目类别</p>
+                    <p id="statTotalCategories" class="text-xl font-bold text-[#3d6f7f] mt-1">0 类</p>
+                </div>
+                <div class="bg-[#85BDCF]/20 p-2 rounded-xl text-[#3d6f7f]">📊</div>
+            </div>
+        </div>
+
+        <!-- 主数据网格 (支持一屏阅读) -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            <!-- 左侧：工地列表 (默认折叠 + 已补充模糊搜索输入框) -->
+            <div class="lg:col-span-7 glass-panel rounded-2xl p-5 flex flex-col h-[520px] shadow-lg">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3 pb-2 border-b border-white/20">
+                    <h2 class="text-sm font-bold text-[#3d6f7f] flex items-center">
+                        <span class="w-1.5 h-4 bg-[#85BDCF] rounded mr-2"></span> 店铺明细 (点击展开)
+                    </h2>
+                    <!-- 搜索输入框 -->
+                    <div class="relative w-full sm:w-44">
+                        <input type="text" id="storeSearchInput" oninput="filterStores()" placeholder="🔍 搜索店铺名称..." class="w-full px-2.5 py-1 text-[11px] rounded-lg bg-white/40 border border-white/50 text-slate-800 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-[#85BDCF]" />
+                    </div>
+                </div>
+                <div id="storesDetailContainer" class="flex-1 overflow-y-auto no-scrollbar space-y-2.5">
+                    <!-- 动态渲染折叠卡片 -->
+                </div>
+            </div>
+
+            <!-- 右侧：单位造价分析 -->
+            <div class="lg:col-span-5 glass-panel rounded-2xl p-5 flex flex-col h-[520px] shadow-lg">
+                <h2 class="text-sm font-bold text-[#3d6f7f] mb-3 flex items-center">
+                    <span class="w-1.5 h-4 bg-[#85BDCF] rounded mr-2"></span> 各项目平均单位造价分析
+                </h2>
+                <div class="flex-1 overflow-y-auto no-scrollbar">
+                    <table class="min-w-full text-xs">
+                        <thead class="bg-white/40 sticky top-0 backdrop-blur-sm z-10">
+                            <tr class="border-b border-white/50 text-slate-600">
+                                <th class="px-3 py-2.5 text-left font-semibold">项目类别</th>
+                                <th class="px-3 py-2.5 text-right font-semibold">累计金额</th>
+                                <th class="px-3 py-2.5 text-right font-semibold text-[#3d6f7f]">平均单价</th>
+                                <th class="px-3 py-2.5 text-center font-semibold">有效样本</th>
+                            </tr>
+                        </thead>
+                        <tbody id="averageStatsBody" class="divide-y divide-white/20">
+                            <!-- 动态渲染平均造价 -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- 计算说明 -->
+                <div class="mt-3 p-3 bg-white/20 rounded-xl text-[10px] text-slate-600 border border-white/30">
+                    <strong class="text-slate-800">单位造价算法说明：</strong><br>
+                 例如：<code class="bg-[#85BDCF]/10 px-1 rounded text-[#3d6f7f]">货架平均单价 = (工地A货架/㎡ + 工地B货架/㎡ + ...) ÷ 工地数</code>。
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script>
+    // 1. 全局 JavaScript 运行错误监控 (如果运行中出现任何逻辑错漏，将直接以弹窗告知报错行号)
+    window.onerror = function(message, source, lineno, colno, error) {
+        alert("系统运行出现问题，请将此截图保存：\n\n" + 
+              "错误信息: " + message + "\n" +
+              "报错行号: " + lineno + " 行\n" +
+              "报错列号: " + colno + " 列\n" +
+              "报错源自: " + source);
+        return false;
+    };
+
+    let fileHandle = null;
+    let autoSyncInterval = null;
+    let localFileCache = null; // 用于传统模式下手动刷新的快照
+
+    window.addEventListener('DOMContentLoaded', () => {
+        const browserTips = document.getElementById('browserSupportTips');
+        if (window.showOpenFilePicker) {
+            document.getElementById('btnAutoSync').classList.remove('hidden');
+            browserTips.innerText = "* 浏览器支持“自动刷新”功能，推荐开启获取最佳体验。";
+        } else {
+            browserTips.innerText = "* 如需后台一小时自动刷新功能，推荐使用 Chrome 或 Edge 浏览器。";
+        }
+    });
+
+    // 模糊搜索过滤逻辑
+    function filterStores() {
+        const query = document.getElementById('storeSearchInput').value.toLowerCase().trim();
+        const cards = document.querySelectorAll('.store-card');
+        cards.forEach(card => {
+            const name = card.getAttribute('data-name');
+            if (name) {
+                if (name.toLowerCase().includes(query)) {
+                    card.classList.remove('hidden');
+                } else {
+                    card.classList.add('hidden');
+                }
+            }
+        });
+    }
+
+    // 绑定普通文件选择器
+    document.getElementById('fileInput').addEventListener('change', handleManualFile, false);
+
+    // 手动刷新主函数
+    async function manualRefresh() {
+        if (fileHandle) {
+            updateSyncStatus('正在穿透刷新...');
+            await readAndSyncFile();
+        } else if (localFileCache) {
+            updateSyncStatus('正在重载缓存...');
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                parseExcel(event.target.result);
+                const now = new Date();
+                updateSyncStatus(`已刷新 (${now.toTimeString().split(' ')[0]})`);
+            };
+            reader.readAsArrayBuffer(localFileCache);
+        } else {
+            alert("请先导入 Excel 表格再进行刷新。");
+        }
+    }
+
+    // 传统手动导入逻辑
+    function handleManualFile(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        localFileCache = file; // 缓存文件引用
+
+        if (autoSyncInterval) {
+            clearInterval(autoSyncInterval);
+            document.getElementById('btnAutoSync').classList.remove('bg-white/80', 'border-[#85BDCF]');
+        }
+
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            parseExcel(event.target.result);
+            updateSyncStatus('已成功导入');
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    // 基于 File System Access API 的自动刷新
+    async function selectFileForSync() {
+        try {
+            const [handle] = await window.showOpenFilePicker({
+                types: [{
+                    description: 'Excel 费用表',
+                    accept: {
+                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+                        'application/vnd.ms-excel': ['.xls']
+                    }
+                }],
+                multiple: false
+            });
+            
+            fileHandle = handle;
+            await readAndSyncFile();
+
+            // 启动 1小时 定时器 (3600000 毫秒)
+            if (autoSyncInterval) clearInterval(autoSyncInterval);
+            autoSyncInterval = setInterval(async () => {
+                await readAndSyncFile();
+            }, 3600000); 
+
+            document.getElementById('btnAutoSync').classList.add('bg-white/80', 'border-[#85BDCF]');
+        } catch (err) {
+            console.log("用户取消授权: ", err);
+        }
+    }
+
+    async function readAndSyncFile() {
+        if (!fileHandle) return;
+        try {
+            const file = await fileHandle.getFile(); 
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                parseExcel(event.target.result);
+                const now = new Date();
+                const timeStr = now.toTimeString().split(' ')[0];
+                updateSyncStatus(`已同步 (${timeStr})`);
+            };
+            reader.readAsArrayBuffer(file);
+        } catch (error) {
+            updateSyncStatus('读取失败，请确认文件未被Excel独占');
+            console.error(error);
+        }
+    }
+
+    function updateSyncStatus(text) {
+        const statusEl = document.getElementById('syncStatus');
+        statusEl.innerText = text;
+        statusEl.classList.remove('text-slate-600');
+        statusEl.classList.add('text-[#3d6f7f]', 'font-semibold');
+    }
+
+    function parseExcel(arrayBuffer) {
+        try {
+            const data = new Uint8Array(arrayBuffer);
+            // 采用最原始纯净的 XLSX 读取方式 (不加入任何防卡死屏蔽参数，确保原汁原味读取)
+            const workbook = XLSX.read(data, { type: 'array' });
+            const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+            
+            processAndRender(rows);
+        } catch (e) {
+            alert("解析错误，请确认表格文件格式。");
+            console.error(e);
+        }
+    }
+
+    function toggleStore(storeId) {
+        const details = document.getElementById(`details-${storeId}`);
+        const icon = document.getElementById(`icon-${storeId}`);
+        const isHidden = details.classList.contains('hidden');
+        
+        if (isHidden) {
+            details.classList.remove('hidden');
+            icon.classList.add('rotate-90');
+        } else {
+            details.classList.add('hidden');
+            icon.classList.remove('rotate-90');
+        }
+    }
+
+    function processAndRender(rows) {
+        let storeColIndex = -1;
+        let categoryColIndex = -1;
+        let amountColIndex = -1;
+        let areaColIndex = -1;
+        let dataStartRow = 0;
+
+        for (let r = 0; r < rows.length; r++) {
+            const row = rows[r];
+            if (!row) continue;
+            
+            const storeIdx = row.findIndex(cell => cell && cell.toString().includes("店名"));
+            const categoryIdx = row.findIndex(cell => cell && cell.toString().includes("费用类别"));
+            const amountIdx = row.findIndex(cell => cell && cell.toString().includes("金额"));
+            const areaIdx = row.findIndex(cell => cell && cell.toString().includes("面积"));
+
+            if (storeIdx !== -1 && categoryIdx !== -1) {
+                storeColIndex = storeIdx;
+                categoryColIndex = categoryIdx;
+                amountColIndex = amountIdx !== -1 ? amountIdx : categoryIdx + 1;
+                areaColIndex = areaIdx !== -1 ? areaIdx : -1;
+                dataStartRow = r + 1;
+                break;
+            }
+        }
+
+        if (storeColIndex === -1) {
+            storeColIndex = 1; categoryColIndex = 2; amountColIndex = 3; areaColIndex = 7; dataStartRow = 2; 
+        }
+
+        // 新增数据时，初始化清空搜索栏，防止新表格导入后因旧检索词导致显示空白
+        const searchInput = document.getElementById('storeSearchInput');
+        if (searchInput) searchInput.value = '';
+
+        let currentStore = "";
+        let currentArea = null;
+        const rawDataList = [];
+
+        for (let i = dataStartRow; i < rows.length; i++) {
+            const row = rows[i];
+            if (!row || row.length === 0) continue;
+
+            let storeVal = row[storeColIndex] ? row[storeColIndex].toString().trim() : "";
+            let categoryVal = row[categoryColIndex] ? row[categoryColIndex].toString().trim() : "";
+            let amountVal = row[amountColIndex];
+
+            if (storeVal !== "") {
+                currentStore = storeVal;
+                if (areaColIndex !== -1 && row[areaColIndex] !== "" && row[areaColIndex] !== undefined && row[areaColIndex] !== null) {
+                    currentArea = parseFloat(row[areaColIndex]);
+                    if (isNaN(currentArea)) currentArea = null;
+                } else {
+                    currentArea = null;
+                }
+            }
+
+            if (!currentStore || currentStore === "店名" || currentStore.includes("合计") || currentStore.includes("汇总") || currentStore.includes("折后")) {
+                continue;
+            }
+
+            if (categoryVal !== "" && categoryVal !== "费用类别" && categoryVal !== "合计") {
+                let amount = parseFloat(amountVal);
+                if (isNaN(amount)) amount = null;
+
+                rawDataList.push({
+                    store: currentStore,
+                    area: currentArea,
+                    category: categoryVal,
+                    amount: amount
+                });
+            }
+        }
+
+        // 2. 诊断调试：如果数据为空导致页面不加载，会直接弹出弹窗告知，决不静默退出
+        if (rawDataList.length === 0) {
+            alert("【诊断调试提示】\n表格读取成功，但未解析出有效数据。请检查：\n\n" +
+                  "1. 成功读取到的表格行数: " + rows.length + " 行\n" +
+                  "2. 解析表头定位: 店名Col=" + storeColIndex + ", 类别Col=" + categoryColIndex + ", 金额Col=" + amountColIndex + ", 面积Col=" + areaColIndex + "\n" +
+                  "3. 起始读取行数: 第 " + dataStartRow + " 行");
+            return;
+        }
+
+        const storesMap = {};
+        const categoriesMap = {};
+        let grandTotalCost = 0;
+
+        rawDataList.forEach(item => {
+            if (!storesMap[item.store]) {
+                storesMap[item.store] = {
+                    name: item.store,
+                    area: item.area,
+                    items: [],
+                    total: 0
+                };
+            }
+            storesMap[item.store].items.push(item);
+            if (item.amount !== null) {
+                storesMap[item.store].total += item.amount;
+                grandTotalCost += item.amount;
+            }
+
+            if (!categoriesMap[item.category]) {
+                categoriesMap[item.category] = {
+                    name: item.category,
+                    totalAmount: 0,
+                    sumOfUnitCosts: 0,
+                    unitCostSiteCount: 0
+                };
+            }
+
+            if (item.amount !== null) {
+                categoriesMap[item.category].totalAmount += item.amount;
+                if (item.area !== null && item.area > 0) {
+                    const unitCost = item.amount / item.area;
+                    categoriesMap[item.category].sumOfUnitCosts += unitCost;
+                    categoriesMap[item.category].unitCostSiteCount += 1;
+                }
+            }
+        });
+
+        document.getElementById('statTotalStores').innerText = `${Object.keys(storesMap).length} 个`;
+        document.getElementById('statTotalCost').innerText = `¥ ${grandTotalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        document.getElementById('statTotalCategories').innerText = `${Object.keys(categoriesMap).length} 类`;
+
+        // 5. 左侧折叠工地卡片渲染 (毛玻璃适配)
+        const storesContainer = document.getElementById('storesDetailContainer');
+        storesContainer.innerHTML = '';
+
+        Object.values(storesMap).forEach(store => {
+            const storeId = encodeURIComponent(store.name).replace(/%/g, '_');
+            
+            // 统计该店铺目前已经填写、且参与计算的类别数量
+            const activeItemsCount = store.items.filter(item => item && item.amount !== null).length;
+
+            let itemsHtml = '';
+            store.items.forEach(item => {
+                const priceStr = item.amount !== null ? `¥ ${item.amount.toLocaleString()}` : '<span class="text-slate-400">（未核算）</span>';
+                const perSqmStr = (item.amount !== null && store.area) ? `<span class="text-[10px] text-slate-500 ml-1.5">(${(item.amount / store.area).toFixed(1)}元/㎡)</span>` : '';
+                
+                itemsHtml += `
+                    <div class="flex justify-between py-1 border-b border-white/20 text-[11px]">
+                        <span class="text-slate-600">${item.category} ${perSqmStr}</span>
+                        <span class="font-medium text-slate-900">${priceStr}</span>
+                    </div>
+                `;
+            });
+
+            let sqmDisplay = store.area ? `<span class="text-xs text-slate-500 ml-1.5 font-mono">(${store.area} ㎡)</span>` : '';
+            
+            // 将 activeItemsCount (已统计项数) 呈现在单位造价后方
+            let unitCostDisplay = (store.area && store.total > 0) ? `<span class="text-[10px] text-[#3d6f7f] bg-[#85BDCF]/10 border border-white/40 px-1.5 py-0.5 rounded-md ml-1.5 font-medium inline-flex items-center">¥ ${(store.total / store.area).toFixed(1)}/㎡ <span class="opacity-65 text-[9px] font-normal ml-1">(${activeItemsCount}项)</span></span>` : '';
+
+            const cardHtml = `
+                <div class="store-card border border-white/50 bg-white/20 rounded-xl overflow-hidden shadow-sm transition hover:bg-white/30" data-name="${store.name}">
+                    <!-- 折叠头部 -->
+                    <div onclick="toggleStore('${storeId}')" class="flex justify-between items-center p-3 cursor-pointer select-none">
+                        <div class="flex items-center space-x-1.5">
+                            <svg id="icon-${storeId}" class="w-3 h-3 text-[#528d9f] transform transition-transform duration-150" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M9 5l7 7-7 7"></path>
+                            </svg>
+                            <span class="font-bold text-slate-800 text-xs">${store.name}</span>
+                            ${sqmDisplay}
+                            ${unitCostDisplay}
+                        </div>
+                        <div class="text-right flex items-center space-x-2">
+                            <span class="text-[10px] text-slate-500">总造价</span>
+                            <span class="font-bold text-[#3d6f7f] text-xs">¥ ${store.total.toLocaleString()}</span>
+                        </div>
+                    </div>
+                    
+                    <!-- 折叠明细 -->
+                    <div id="details-${storeId}" class="hidden p-3 bg-white/30 border-t border-white/40 space-y-1">
+                        ${itemsHtml}
+                    </div>
+                </div>
+            `;
+            storesContainer.insertAdjacentHTML('beforeend', cardHtml);
+        });
+
+        // 6. 右侧：各项目平均单位造价分析
+        const averageBody = document.getElementById('averageStatsBody');
+        averageBody.innerHTML = '';
+
+        Object.values(categoriesMap).forEach(cat => {
+            const avgUnitCost = cat.unitCostSiteCount > 0 ? (cat.sumOfUnitCosts / cat.unitCostSiteCount) : 0;
+            const unitCostDisplay = cat.unitCostSiteCount > 0 
+                ? `<span class="text-[#3d6f7f] font-semibold">¥ ${avgUnitCost.toFixed(1)}</span> <span class="text-[10px] text-slate-500">/㎡</span>`
+                : `<span class="text-slate-400">-</span>`;
+
+            const rowHtml = `
+                <tr class="hover:bg-white/20 transition">
+                    <td class="px-3 py-2.5 font-medium text-slate-800">${cat.name}</td>
+                    <td class="px-3 py-2.5 text-right text-slate-600">¥ ${cat.totalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                    <td class="px-3 py-2.5 text-right">${unitCostDisplay}</td>
+                    <td class="px-3 py-2.5 text-center text-slate-500 font-mono">${cat.unitCostSiteCount} 个工地</td>
+                </tr>
+            `;
+            averageBody.insertAdjacentHTML('beforeend', rowHtml);
+        });
+
+        document.getElementById('noDataTips').classList.add('hidden');
+        document.getElementById('dashboard').classList.remove('hidden');
+    }
+</script>
+</body>
+</html>
