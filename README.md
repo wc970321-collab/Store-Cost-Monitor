@@ -1,7 +1,8 @@
-# HG 调改形象新装店铺造价系统 (HG-Store-Cost-Monitor)
+# 新装店铺造价系统 (HG-Store-Cost-Monitor)
 
 > **轻量级、无后端的商业空间建造与店铺调改造价监控系统。**  
 > 专为零售、餐饮、连锁品牌新装或形象调改项目打造。基于纯前端解析本地 Excel 文件，实现店铺明细秒级呈现、模糊搜索、每平米单位造价换算以及跨工地项目造价的大盘平均值统计。
+<img width="1059" height="917" alt="image" src="https://github.com/user-attachments/assets/31722205-08eb-43e3-8782-4ed3c81f0b9c" />
 
 ---
 
